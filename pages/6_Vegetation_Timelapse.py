@@ -314,9 +314,9 @@ WORLD_REGIONS = [
 ]
 default_region_index = WORLD_REGIONS.index("Africa")
 
-@st.cache_data
-def ee_authenticate(token_name="EARTHENGINE_TOKEN"):
-    geemap.ee_initialize(token_name=token_name)
+from ee_init import ensure_ee_ready
+ensure_ee_ready()
+
 
 
 def label_gif_with_month(gif_bytes, labels, fps, xy=(10, 10)):
