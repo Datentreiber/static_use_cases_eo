@@ -1,25 +1,17 @@
 --find-links=https://girder.github.io/large_image_wheels GDAL
-# cartopy
-earthengine-api # NEW
-fiona # NEW
-folium #==0.13.0
-geemap==0.36.1 # NEW
-geemap[extra]
+
+# Core EO/Geo
+earthengine-api
+geemap==0.36.1
 geopandas
-# jupyterlab # NEW
-jupyter-server-proxy
-keplergl
-leafmap
-localtileserver
-nbserverproxy
+shapely
+pyproj
+fiona
+folium
 owslib
 palettable
 plotly
-streamlit
-streamlit-bokeh-events
-streamlit-folium
-streamlit-keplergl
-tropycal
-# git+https://github.com/giswqs/leafmap
-# git+https://github.com/giswqs/geemap
 
+# Streamlit + Map-Bridge
+streamlit
+streamlit-folium
