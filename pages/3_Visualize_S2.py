@@ -17,9 +17,9 @@ MAP_PARAMS: dict[str, list[str]] = {
 shared_vis = {"min": 0, "max": 0.325, "gamma": 1.0}
 
 
-@st.cache_data
-def ee_authenticate(token_name="EARTHENGINE_TOKEN"):
-    geemap.ee_initialize(token_name=token_name)
+from ee_init import ensure_ee_ready
+ensure_ee_ready()
+
 
 def show_s2_fccs():
     ee_authenticate()
