@@ -11,6 +11,7 @@ folium
 owslib
 palettable
 plotly
+leafmap
 
 # Streamlit + Map-Bridge
 streamlit
