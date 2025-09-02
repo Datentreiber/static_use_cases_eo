@@ -21,83 +21,14 @@ import pandas as pd
 import streamlit as st
 import json
 
+from ee_init import ensure_ee_ready
+ensure_ee_ready()
+
 
 st.set_page_config(page_title='Nighttime Lights Blackout App', layout='wide')
 
 
 
-try:
-    import geemap  # optionaler Fallback
-except Exception:
-    geemap = None
-
-@st.cache_resource(show_spinner=False)
-def ee_client_init(token_name: str = "EARTHENGINE_TOKEN") -> str:
-    """
-    Initialisiert Earth Engine genau einmal pro App-Prozess.
-    Reihenfolge:
-      1) ADC (lokale Dev-Umgebung)
-      2) Service Account aus st.secrets['gcp_service_account'] (+ st.secrets['ee_project'] optional)
-      3) geemap.ee_initialize(token_name=...) als Fallback
-    """
-    # 0) Bereits initialisiert?
-    try:
-        ee.Number(1).getInfo()
-        return "ok:already"
-    except Exception:
-        pass
-
-    # 1) Application Default Credentials (lokal)
-    try:
-        ee.Initialize()
-        ee.Number(1).getInfo()
-        return "ok:adc"
-    except Exception:
-        pass
-
-    # 2) Service Account (empfohlen für Streamlit Cloud)
-    try:
-        sa_blob = st.secrets["gcp_service_account"]  # KeyError falls nicht gesetzt
-        sa_info = json.loads(sa_blob)
-        from google.oauth2 import service_account
-        scopes = [
-            "https://www.googleapis.com/auth/earthengine",
-            "https://www.googleapis.com/auth/devstorage.read_write",
-        ]
-        creds = service_account.Credentials.from_service_account_info(sa_info, scopes=scopes)
-        project = st.secrets.get("ee_project", sa_info.get("project_id"))
-        ee.Initialize(credentials=creds, project=project)
-        ee.Number(1).getInfo()
-        return "ok:service_account"
-    except KeyError:
-        # kein Secret → weiter zu (3)
-        pass
-    except Exception as e:
-        st.error("Earth Engine mit Service Account konnte nicht initialisiert werden. "
-                 "Prüfe EE-Rechte (IAM) und das Secret-Format.")
-        st.exception(e)
-        st.stop()
-
-    # 3) Fallback: geemap Token-Store (dein alter Weg)
-    try:
-        if geemap is None:
-            raise RuntimeError("geemap nicht installiert")
-        geemap.ee_initialize(token_name=token_name)
-        ee.Number(1).getInfo()
-        return "ok:geemap_token"
-    except Exception as e:
-        st.error(
-            "Earth Engine ist nicht initialisiert.\n\n"
-            "Empfehlung: hinterlege einen Service-Account-Key in st.secrets['gcp_service_account'] "
-            "und (optional) st.secrets['ee_project']."
-        )
-        st.exception(e)
-        st.stop()
-
-def ensure_ee_ready() -> None:
-    """Vor JEDEM ee.Geometry/... Aufruf einmal aufrufen."""
-    _status = ee_client_init()
-    # Optional: st.sidebar.info(f"EE init status: {_status}")
 
 
 
