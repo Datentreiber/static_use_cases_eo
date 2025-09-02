@@ -7,6 +7,11 @@ import geemap.foliumap as geemap
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageSequence
 
+
+from ee_init import ensure_ee_ready
+ensure_ee_ready()
+
+
 st.set_page_config(page_title="Landsat Timelapse from 1984-2025", layout="wide")
 
 st.title("Landsat Timelapse from 1984-2025")
