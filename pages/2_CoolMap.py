@@ -6,9 +6,9 @@ import folium
 st.set_page_config(layout="wide")
 
 
-@st.cache_data
-def ee_authenticate(token_name="EARTHENGINE_TOKEN"):
-    geemap.ee_initialize(token_name=token_name)
+from ee_init import ensure_ee_ready
+ensure_ee_ready()
+
 
 def mask_landsat_l2(img):
     qa = img.select('QA_PIXEL')
