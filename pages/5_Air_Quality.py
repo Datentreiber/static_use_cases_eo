@@ -9,9 +9,9 @@ import geemap.foliumap as geemap
 
 st.set_page_config(page_title="Sentinel-5P NO₂ Dashboard", layout="wide")
 
-@st.cache_data
-def ee_authenticate(token_name="EARTHENGINE_TOKEN"):
-    geemap.ee_initialize(token_name=token_name)
+from ee_init import ensure_ee_ready
+ensure_ee_ready()
+
 
 
 def no2():
