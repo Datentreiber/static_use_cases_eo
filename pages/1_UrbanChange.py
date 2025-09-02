@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
+from ee_init import ensure_ee_ready
+ensure_ee_ready()
+
 
 GHSL_PREFIX = "JRC/GHSL/P2023A/GHS_BUILT_S"  # built_surface, built_surface_nres
 ghsl_vis = {
