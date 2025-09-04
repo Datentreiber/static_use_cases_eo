@@ -1,7 +1,6 @@
 --find-links=https://girder.github.io/large_image_wheels GDAL
 
 # Core EO/Geo
-earthengine-api
 geemap==0.36.1
 geopandas
 shapely
@@ -12,6 +11,9 @@ owslib
 palettable
 plotly
 leafmap
+google-auth>=2
+earthengine-api>=0.1.400
+
 
 # Streamlit + Map-Bridge
 streamlit
