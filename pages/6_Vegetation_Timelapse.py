@@ -5,6 +5,7 @@ import geemap.foliumap as geemap
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont, ImageSequence
 import requests, io
+from ee_init import ensure_ee_ready
 
 st.set_page_config(page_title="Timelapses", layout="wide")
 
@@ -471,7 +472,7 @@ def ndvi(aoi_type):
             )
 
 def app():
-    ee_authenticate()
+    ensure_ee_ready()
 
     apps = [
         "NDVI Continent",
