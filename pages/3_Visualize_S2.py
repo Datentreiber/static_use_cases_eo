@@ -21,7 +21,6 @@ from ee_init import ensure_ee_ready
 
 
 def show_s2_fccs():
-    ee_authenticate()
     Map = geemap.Map(center=[51.495065, -0.126343], zoom=10, basemap="SATELLITE")  # Uses Esri.WorldImagery on London
     Map.add_basemap("CartoDB.PositronOnlyLabels")  # labels-only overlay
 
