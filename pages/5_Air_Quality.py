@@ -10,7 +10,6 @@ import geemap.foliumap as geemap
 st.set_page_config(page_title="Sentinel-5P NO₂ Dashboard", layout="wide")
 
 from ee_init import ensure_ee_ready
-ensure_ee_ready()
 
 
 
@@ -74,7 +73,8 @@ def no2():
 
 def app():
 
-    ee_authenticate()
+    ensure_ee_ready()
+
 
     apps = [
         "NO2", 
