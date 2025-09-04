@@ -22,7 +22,7 @@ import streamlit as st
 import json
 
 from ee_init import ensure_ee_ready
-ensure_ee_ready()
+
 
 
 st.set_page_config(page_title='Nighttime Lights Blackout App', layout='wide')
@@ -338,7 +338,7 @@ def nightlights():
     m.to_streamlit()
 
 def app():
-    ee_authenticate()
+    ensure_ee_ready()
 
     nightlights()
 
