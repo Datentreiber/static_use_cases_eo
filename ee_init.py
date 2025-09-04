@@ -1,134 +1,191 @@
-# ee_init.py — zentrale Earth Engine Initialisierung für Streamlit
-# Unterstützt:
-# - st.secrets["gcp_service_account"] (vollständiges Service-Account-JSON als Text)
-# - st.secrets["EE_PRIVATE_KEY"] (+ optional st.secrets["EE_PROJECT"])
-# - Umgebungsvariablen EE_PRIVATE_KEY (+ optional EE_PROJECT)
-# - Fallback via geemap.ee_initialize(token_name="EARTHENGINE_TOKEN")
-
+# ee_init.py — robuste Earth Engine Initialisierung (Service Account bevorzugt)
 import os
 import json
-import ee
+import base64
+from typing import Optional, Tuple
+
 import streamlit as st
+import ee
 
 try:
-    import geemap  # optionaler Fallback
+    import geemap  # optional; nur wenn explizit gewünscht
 except Exception:
     geemap = None
 
-from typing import Optional, Tuple
-
-# Scopes für Earth Engine + GCS
 _GCP_SCOPES = [
     "https://www.googleapis.com/auth/earthengine",
     "https://www.googleapis.com/auth/devstorage.full_control",
 ]
 
+def _preview(s: str, n: int = 120) -> str:
+    s = (s or "").strip().replace("\n", "\\n")
+    return (s[:n] + ("…" if len(s) > n else "")) or "(leer)"
+
+def _load_from_secrets_or_env(key: str) -> Optional[str]:
+    # st.secrets kann in manchen Umgebungen fehlen; defensiv lesen
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.environ.get(key)
+
+def _parse_service_account_json(raw: str) -> dict:
+    """Akzeptiert mehrere Formate:
+    1) Direktes JSON
+    2) Base64-encodetes JSON
+    3) Pfad zu einer JSON-Datei
+    4) Python-Dict-String mit '...' → sicher in JSON konvertieren
+    """
+    if not raw or not isinstance(raw, str):
+        raise ValueError("EE_PRIVATE_KEY ist leer oder kein String.")
+
+    s = raw.strip()
+
+    # 3) Dateipfad?
+    if len(s) < 512 and (s.endswith(".json") or os.path.sep in s):
+        if not os.path.exists(s):
+            raise FileNotFoundError(f"EE_PRIVATE_KEY verweist auf einen Pfad, der nicht existiert: {s}")
+        with open(s, "r", encoding="utf-8") as f:
+            s = f.read().strip()
+
+    # 1) Direktes JSON?
+    if s.startswith("{") and s.endswith("}"):
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"EE_PRIVATE_KEY sieht aus wie JSON, konnte aber nicht geparst werden: {e}")
+
+    # 2) Base64?
+    # Heuristik: Base64 ist oft länger, enthält nur zulässige Zeichen und decodiert zu JSON.
+    b64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r"
+    if all(c in b64_chars for c in s):
+        try:
+            decoded = base64.b64decode(s, validate=False).decode("utf-8", errors="strict").strip()
+            if decoded.startswith("{") and decoded.endswith("}"):
+                return json.loads(decoded)
+        except Exception:
+            pass  # weiterprobieren
+
+    # 4) Python-Dict-String (mit einfachen Anführungszeichen)
+    # Vorsichtig normalisieren: nur das Äußere ersetzen, keine Keys/Values zerstören.
+    # Sehr simple Heuristik: wenn mindestens zwei Vorkommen von "': " und keine doppelten Quotes, konvertieren.
+    looks_like_py_dict = s.startswith("{") and s.endswith("}") and ("':" in s or "': " in s) and ('"' not in s)
+    if looks_like_py_dict:
+        try:
+            s_jsonish = s.replace("'", '"')
+            return json.loads(s_jsonish)
+        except Exception as e:
+            raise ValueError(
+                "EE_PRIVATE_KEY scheint ein Python-Dict-String zu sein (mit einfachen Quotes). "
+                "Bitte echtes JSON verwenden oder Base64/Dateipfad angeben."
+            ) from e
+
+    # Nur private_key ohne Rest?
+    if "BEGIN PRIVATE KEY" in s and "client_email" not in s:
+        raise ValueError(
+            "EE_PRIVATE_KEY enthält offenbar nur den 'private_key' Block. "
+            "Erforderlich ist das **vollständige** Service-Account-JSON (mit type, project_id, client_email, token_uri, …)."
+        )
+
+    # Letzte Chance: klarer Fehler mit Vorschlägen
+    raise ValueError(
+        "EE_PRIVATE_KEY ist in einem unbekannten Format.\n"
+        f"Vorschau: { _preview(s) }\n\n"
+        "Erlaubte Formen:\n"
+        "  • Direktes JSON (beginnend mit '{')\n"
+        "  • Base64-encodetes JSON (als String)\n"
+        "  • Pfad zu einer JSON-Datei\n"
+        "  • KEIN Python-Dict mit einfachen Quotes — bitte echtes JSON verwenden"
+    )
+
+def _build_credentials(svc_info: dict):
+    try:
+        from google.oauth2 import service_account
+    except Exception as e:
+        raise RuntimeError(
+            "google-auth ist nicht installiert. Bitte 'google-auth>=2' in requirements aufnehmen."
+        ) from e
+    # Minimalprüfung der Schlüssel
+    for k in ("type", "project_id", "private_key", "client_email", "token_uri"):
+        if not svc_info.get(k):
+            raise ValueError(f"Service-Account-JSON unvollständig: Feld '{k}' fehlt oder ist leer.")
+    if svc_info.get("type") != "service_account":
+        raise ValueError("Service-Account-JSON: 'type' muss 'service_account' sein.")
+    return service_account.Credentials.from_service_account_info(svc_info, scopes=_GCP_SCOPES)
+
+def _geemap_allowed() -> bool:
+    val = _load_from_secrets_or_env("ALLOW_GEEMAP_FALLBACK")
+    if val is None:
+        return False  # Standard: KEIN OAuth-Fallback in Headless-Umgebungen
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
+
 @st.cache_resource(show_spinner=False)
-def ee_client_init(token_name: str = "EARTHENGINE_TOKEN") -> str:
-    """Initialisiert Earth Engine einmalig pro Session und liefert eine Kennung des verwendeten Pfads zurück."""
-    # 0) Bereits initialisiert?
+def ee_client_init() -> str:
+    """Initialisiert EE einmal pro Session. Rückgabe: Text über die Quelle."""
+    # Bereits initialisiert?
     try:
         ee.Number(1).getInfo()
         return "ok:already_initialized"
     except Exception:
         pass
 
-    # 1) Versuche st.secrets["gcp_service_account"] (bestehender Weg)
-    #    Erwartet komplettes JSON als String.
-    svc_json_text = None
-    ee_project = None
+    # Keys laden
+    raw_key = _load_from_secrets_or_env("EE_PRIVATE_KEY")
+    ee_project = _load_from_secrets_or_env("EE_PROJECT")
+    # EE_SERVICE_ACCOUNT ist optional/informativ
+    _ = _load_from_secrets_or_env("EE_SERVICE_ACCOUNT")
 
-    if "gcp_service_account" in st.secrets:
-        svc_json_text = st.secrets["gcp_service_account"]
-        ee_project = st.secrets.get("ee_project") or st.secrets.get("EE_PROJECT")
-
-    # 2) Falls nicht vorhanden: st.secrets["EE_PRIVATE_KEY"] (+ optional EE_PROJECT)
-    if svc_json_text is None and "EE_PRIVATE_KEY" in st.secrets:
-        svc_json_text = st.secrets["EE_PRIVATE_KEY"]
-        ee_project = ee_project or st.secrets.get("EE_PROJECT") or st.secrets.get("ee_project")
-
-    # 3) Falls weiterhin nicht vorhanden: Environment EE_PRIVATE_KEY (+ optional EE_PROJECT)
-    if svc_json_text is None and "EE_PRIVATE_KEY" in os.environ:
-        svc_json_text = os.environ.get("EE_PRIVATE_KEY")
-        ee_project = ee_project or os.environ.get("EE_PROJECT")
-
-    # 4) EE_SERVICE_ACCOUNT ist informativ; nicht zwingend benötigt, wenn das JSON komplett ist.
-    ee_service_account = (
-        st.secrets.get("EE_SERVICE_ACCOUNT")
-        if hasattr(st, "secrets") else None
-    )
-    ee_service_account = ee_service_account or os.environ.get("EE_SERVICE_ACCOUNT")
-
-    # 5) Initialisierung über google.oauth2.service_account
-    #    Wir parsen das JSON (String) -> dict und erzeugen Credentials mit Scopes.
-    if svc_json_text:
+    # Service-Account bevorzugen
+    if raw_key:
         try:
-            svc_info = _parse_service_account_json(svc_json_text)
+            svc_info = _parse_service_account_json(raw_key)
             creds = _build_credentials(svc_info)
             if ee_project:
                 ee.Initialize(credentials=creds, project=ee_project)
             else:
-                # project ist optional; Earth Engine nutzt dann das dem Service Account zugeordnete Projekt.
                 ee.Initialize(credentials=creds)
-            # Sanity-Check
+            # Testcall
             ee.Number(1).getInfo()
             return f"ok:service_account_json{'_with_project' if ee_project else ''}"
         except Exception as e:
             st.error(
-                "Earth Engine Initialisierung via Service-Account-JSON ist fehlgeschlagen. "
-                "Bitte prüfe:\n"
-                "• Das JSON ist vollständig (type, project_id, private_key, client_email, token_uri, …)\n"
-                "• Der Service Account hat EE-Zugriff (earthengine.google.com → IAM) und ist in EE registriert\n"
-                "• Optional: EE_PROJECT ist korrekt gesetzt"
+                "Earth Engine Initialisierung via Service-Account-JSON fehlgeschlagen.\n"
+                f"EE_PRIVATE_KEY Vorschau: { _preview(raw_key) }\n\n"
+                "Bitte sicherstellen:\n"
+                "• EE_PRIVATE_KEY enthält das **vollständige** JSON (nicht nur den private_key)\n"
+                "• Format ist JSON, Base64-JSON oder ein gültiger Datei-Pfad\n"
+                "• Service Account ist für EE freigeschaltet (https://earthengine.google.com/ → IAM) und dem Projekt zugeordnet\n"
+                "• Optional: EE_PROJECT korrekt gesetzt"
             )
             st.exception(e)
-            # Nicht abbrechen: wir versuchen noch den geemap-Fallback
+            # kein sofortiges Stop — evtl. geemap-Fallback, wenn explizit erlaubt
 
-    # 6) Fallback: geemap Token-Store (dein alter Weg)
-    try:
-        if geemap is None:
-            raise RuntimeError("geemap nicht installiert")
-        geemap.ee_initialize(token_name=token_name)
-        ee.Number(1).getInfo()
-        return "ok:geemap_token"
-    except Exception as e:
-        st.error(
-            "Earth Engine ist nicht initialisiert.\n\n"
-            "Empfehlung: Hinterlege den vollständigen Service-Account-Key entweder als "
-            "st.secrets['EE_PRIVATE_KEY'] oder Umgebungsvariable EE_PRIVATE_KEY "
-            "(als komplettes JSON), und optional EE_PROJECT."
-        )
-        st.exception(e)
-        st.stop()
+    # Optionaler Fallback über geemap (nur wenn ausdrücklich erlaubt)
+    if _geemap_allowed():
+        try:
+            if geemap is None:
+                raise RuntimeError("geemap nicht installiert")
+            token_name = _load_from_secrets_or_env("EARTHENGINE_TOKEN") or "EARTHENGINE_TOKEN"
+            geemap.ee_initialize(token_name=str(token_name))
+            ee.Number(1).getInfo()
+            return "ok:geemap_token"
+        except Exception as e:
+            st.error(
+                "geemap-Fallback fehlgeschlagen (OAuth-Token nicht vorhanden oder unvollständig). "
+                "Für Server/Headless-Betrieb wird Service-Account empfohlen."
+            )
+            st.exception(e)
+
+    st.error(
+        "Earth Engine ist nicht initialisiert.\n\n"
+        "Bitte EE_PRIVATE_KEY (vollständiges Service-Account-JSON) und optional EE_PROJECT setzen.\n"
+        "Tipps für Streamlit secrets.toml:\n"
+        "  EE_PROJECT = \"ee-deinprojekt\"\n"
+        "  EE_PRIVATE_KEY = '''{ ... JSON ... }'''\n"
+        "Oder EE_PRIVATE_KEY als Base64 oder als Pfad zu einer .json-Datei angeben."
+    )
+    st.stop()
 
 def ensure_ee_ready() -> None:
-    """Sorgt dafür, dass EE initialisiert ist oder bricht mit klarer Fehlermeldung ab."""
     _ = ee_client_init()
-
-# -------------------- interne Helper --------------------
-
-def _parse_service_account_json(s: str) -> dict:
-    """Akzeptiert den Inhalt eines Service-Account-Keyfiles als String. Liefert dict.
-    Falls s bereits ein JSON-dump ist (inkl. Zeilenumbrüchen), einfach json.loads(s).
-    """
-    # Manche setzen versehentlich nur den private_key ein. Das reicht NICHT.
-    # Wir erwarten das vollständige JSON (type, project_id, private_key_id, private_key, client_email, client_id, auth_uri, token_uri, auth_provider_x509_cert_url, client_x509_cert_url).
-    svc_info = json.loads(s)
-    required = ["type", "project_id", "private_key", "client_email", "token_uri"]
-    missing = [k for k in required if k not in svc_info or not svc_info[k]]
-    if missing:
-        raise ValueError(f"Service-Account-JSON unvollständig. Fehlende Felder: {', '.join(missing)}")
-    if svc_info.get("type") != "service_account":
-        raise ValueError("JSON 'type' ist nicht 'service_account'.")
-    return svc_info
-
-def _build_credentials(svc_info: dict):
-    """Erzeugt google.oauth2.service_account.Credentials mit EE/GCS-Scopes."""
-    try:
-        from google.oauth2 import service_account
-    except Exception as e:
-        raise RuntimeError(
-            "google-auth ist nicht installiert. Füge 'google-auth' zu deinen Abhängigkeiten hinzu."
-        ) from e
-    creds = service_account.Credentials.from_service_account_info(svc_info, scopes=_GCP_SCOPES)
-    return creds
