@@ -18,7 +18,6 @@ shared_vis = {"min": 0, "max": 0.325, "gamma": 1.0}
 
 
 from ee_init import ensure_ee_ready
-ensure_ee_ready()
 
 
 def show_s2_fccs():
@@ -105,7 +104,8 @@ def show_s2_fccs():
 
 
 def app():
-    ee_authenticate()
+    ensure_ee_ready()
+
 
     apps = [
         "S2 False Color Composites"
