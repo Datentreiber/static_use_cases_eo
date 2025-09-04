@@ -101,7 +101,7 @@ def coolmap_simple_select_city():
 def app():
     st.title("Coolmap Variants")
 
-    ee_authenticate()
+    
 
     apps = [
         "COOLMAP SIMPLE SELECT CITY"
