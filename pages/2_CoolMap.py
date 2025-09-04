@@ -7,7 +7,7 @@ st.set_page_config(layout="wide")
 
 
 from ee_init import ensure_ee_ready
-ensure_ee_ready()
+
 
 
 def mask_landsat_l2(img):
@@ -101,7 +101,7 @@ def coolmap_simple_select_city():
 def app():
     st.title("Coolmap Variants")
 
-    
+    ensure_ee_ready()
 
     apps = [
         "COOLMAP SIMPLE SELECT CITY"
